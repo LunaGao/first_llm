@@ -1,4 +1,4 @@
-# test_use_ppo.py
+# python test_use_ppo.py
 import gymnasium as gym
 import torch
 from stable_baselines3 import PPO
