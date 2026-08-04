@@ -2,6 +2,11 @@ import gymnasium as gym
 import numpy as np
 from gymnasium import spaces
 
+try:
+    import pygame
+except ImportError:
+    pygame = None
+
 
 # 方向常量：上、右、下、左
 UP = 0
@@ -20,6 +25,8 @@ class CustomEnv(gym.Env):
         self.grid_size = grid_size
         self.max_steps = max_steps
         self.render_mode = render_mode
+        self.cell_size = 40
+        self.window_size = self.grid_size * self.cell_size
 
         # 动作空间：
         # 0 = 继续直行
@@ -43,6 +50,8 @@ class CustomEnv(gym.Env):
         self.food = None
         self.steps = 0
         self.score = 0
+        self.window = None
+        self.clock = None
 
     def reset(self, seed=None, options=None):
         """重置环境并返回初始观测。"""
@@ -112,36 +121,24 @@ class CustomEnv(gym.Env):
 
     def render(self):
         """渲染环境。"""
-        grid = np.full((self.grid_size, self.grid_size), ".", dtype="<U1")
-
-        for x, y in self.snake[1:]:
-            grid[x, y] = "o"
-
-        if self.snake:
-            head_x, head_y = self.snake[0]
-            grid[head_x, head_y] = "H"
-
-        if self.food is not None:
-            food_x, food_y = self.food
-            grid[food_x, food_y] = "F"
-
         if self.render_mode == "human":
-            print("\n".join(" ".join(row) for row in grid))
-            print(f"score={self.score}, steps={self.steps}\n")
+            self._render_frame()
             return None
 
         if self.render_mode == "rgb_array":
-            image = np.zeros((self.grid_size, self.grid_size, 3), dtype=np.uint8)
-            image[grid == "o"] = np.array([0, 180, 0], dtype=np.uint8)
-            image[grid == "H"] = np.array([0, 255, 0], dtype=np.uint8)
-            image[grid == "F"] = np.array([255, 60, 60], dtype=np.uint8)
-            return image
+            return self._render_frame()
 
         return None
 
     def close(self):
         """释放资源。"""
-        pass
+        if pygame is not None:
+            if self.window is not None:
+                pygame.display.quit()
+                self.window = None
+            if self.clock is not None:
+                self.clock = None
+            pygame.quit()
 
     def _get_observation(self):
         """生成 3 通道网格观测。"""
@@ -209,3 +206,77 @@ class CustomEnv(gym.Env):
         """检查坐标是否在地图内。"""
         x, y = position
         return 0 <= x < self.grid_size and 0 <= y < self.grid_size
+
+    def _render_frame(self):
+        """使用 pygame 渲染当前帧。"""
+        if pygame is None:
+            raise ImportError("未安装 pygame，无法进行图形化渲染，请先执行: pip install pygame")
+
+        if self.render_mode == "human":
+            if self.window is None:
+                pygame.init()
+                pygame.display.init()
+                self.window = pygame.display.set_mode((self.window_size, self.window_size))
+                pygame.display.set_caption("Snake CustomEnv")
+
+            if self.clock is None:
+                self.clock = pygame.time.Clock()
+
+            canvas = self.window
+        else:
+            canvas = pygame.Surface((self.window_size, self.window_size))
+
+        canvas.fill((25, 25, 25))
+
+        # 先画网格，方便观察蛇和食物的位置。
+        for row in range(self.grid_size):
+            for col in range(self.grid_size):
+                rect = pygame.Rect(
+                    col * self.cell_size,
+                    row * self.cell_size,
+                    self.cell_size,
+                    self.cell_size,
+                )
+                pygame.draw.rect(canvas, (45, 45, 45), rect, width=1)
+
+        # 蛇身使用深绿色，蛇头使用亮绿色。
+        for row, col in self.snake[1:]:
+            body_rect = pygame.Rect(
+                col * self.cell_size + 2,
+                row * self.cell_size + 2,
+                self.cell_size - 4,
+                self.cell_size - 4,
+            )
+            pygame.draw.rect(canvas, (0, 160, 0), body_rect, border_radius=6)
+
+        if self.snake:
+            head_row, head_col = self.snake[0]
+            head_rect = pygame.Rect(
+                head_col * self.cell_size + 2,
+                head_row * self.cell_size + 2,
+                self.cell_size - 4,
+                self.cell_size - 4,
+            )
+            pygame.draw.rect(canvas, (0, 220, 0), head_rect, border_radius=8)
+
+        # 食物使用红色圆形。
+        if self.food is not None:
+            food_row, food_col = self.food
+            food_center = (
+                food_col * self.cell_size + self.cell_size // 2,
+                food_row * self.cell_size + self.cell_size // 2,
+            )
+            pygame.draw.circle(canvas, (230, 70, 70), food_center, self.cell_size // 3)
+
+        if self.render_mode == "human":
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    self.close()
+                    return None
+
+            pygame.display.update()
+            self.clock.tick(self.metadata["render_fps"])
+            return None
+
+        frame = pygame.surfarray.array3d(canvas)
+        return np.transpose(frame, (1, 0, 2))
