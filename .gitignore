@@ -1,2 +1,4 @@
 ppo_LunarLander.zip
 ppo_logs
+
+__pycache__/
